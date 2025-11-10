@@ -1,0 +1,50 @@
+﻿@page "/filemakerreferences"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.QuickGrid
+@using FSIWebApp2.Data.Models
+@using FSIWebApp2.Data
+@implements IAsyncDisposable
+@inject IDbContextFactory<FSIWebApp2.Data.ApplicationDbContext> DbFactory
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin, Owner, Reader")]
+
+<PageTitle>Index</PageTitle>
+
+<h1>FileMaker Field Reference</h1>
+<br />
+<AuthorizeView Roles="Admin">
+    <p>
+        <a href="filemakerreferences/create">Create New</a>
+    </p>
+</AuthorizeView>
+<br />
+<QuickGrid Class="table" Items="context.FileMakerReference">
+    <PropertyColumn Property="filemakerreference => filemakerreference.FileMakerName" Sortable="true" Title="FileMaker Name" />
+    <PropertyColumn Property="filemakerreference => filemakerreference.NewFsiName" Sortable="true" Title="New FSI Name" />
+    @* <PropertyColumn Property="filemakerreference => filemakerreference.SQLDataType" Sortable="true" Title="SQL Data Type" /> *@
+    @* <PropertyColumn Property="filemakerreference => filemakerreference.GenericDataType" Sortable="true" Title="Generic Data Type" /> *@
+    <PropertyColumn Property="filemakerreference => filemakerreference.Key" Sortable="true" Title="Key" />
+    @* <PropertyColumn Property="filemakerreference => filemakerreference.Nullable" Sortable="true" Title="Nullable?" /> *@
+    @* <PropertyColumn Property="filemakerreference => filemakerreference.InUse" Sortable="true" Title="In Use?" /> *@
+
+    <AuthorizeView Roles="Admin">
+        <TemplateColumn Context="filemakerreference">
+            <a href="@($"filemakerreferences/edit?id={filemakerreference.Id}")">Edit</a>
+            <a href="@($"filemakerreferences/details?id={filemakerreference.Id}")">Details</a>
+            <a href="@($"filemakerreferences/delete?id={filemakerreference.Id}")">Delete</a>
+        </TemplateColumn>
+    </AuthorizeView>
+
+</QuickGrid>
+
+@code {
+    private ApplicationDbContext context = default!;
+
+    protected override void OnInitialized()
+    {
+        context = DbFactory.CreateDbContext();
+    }
+
+    public async ValueTask DisposeAsync() => await context.DisposeAsync();
+}

@@ -1,0 +1,77 @@
+﻿@page "/filemakerreferences/create"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using FSIWebApp2.Data.Models
+@inject IDbContextFactory<FSIWebApp2.Data.ApplicationDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin")]
+
+<PageTitle>Create</PageTitle>
+
+<h1>Create</h1>
+
+<h2>FileMakerReference</h2>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <EditForm method="post" Model="FileMakerReference" OnValidSubmit="AddFileMakerReference" FormName="create" Enhance>
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" role="alert" />
+            <div class="mb-3">
+                <label for="filemakername" class="form-label">FileMakerName:</label>
+                <InputText id="filemakername" @bind-Value="FileMakerReference.FileMakerName" class="form-control" />
+                <ValidationMessage For="() => FileMakerReference.FileMakerName" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="newfsiname" class="form-label">New Fsi Name:</label>
+                <InputText id="newfsiname" @bind-Value="FileMakerReference.NewFsiName" class="form-control" />
+                <ValidationMessage For="() => FileMakerReference.NewFsiName" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="sqldatatype" class="form-label">SQL Data Type:</label>
+                <InputText id="sqldatatype" @bind-Value="FileMakerReference.SQLDataType" class="form-control" />
+                <ValidationMessage For="() => FileMakerReference.SQLDataType" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="genericdatatype" class="form-label">Generic Data Type:</label>
+                <InputText id="genericdatatype" @bind-Value="FileMakerReference.GenericDataType" class="form-control" />
+                <ValidationMessage For="() => FileMakerReference.GenericDataType" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="key" class="form-label">Key:</label>
+                <InputText id="key" @bind-Value="FileMakerReference.Key" class="form-control" />
+                <ValidationMessage For="() => FileMakerReference.Key" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="nullable" class="form-label">Nullable:</label>
+                <InputCheckbox id="nullable" @bind-Value="FileMakerReference.Nullable" class="form-check-input" />
+                <ValidationMessage For="() => FileMakerReference.Nullable" class="text-danger" />
+            </div>
+            <div class="mb-3">
+                <label for="inuse" class="form-label">InUse:</label>
+                <InputCheckbox id="inuse" @bind-Value="FileMakerReference.InUse" class="form-check-input" />
+                <ValidationMessage For="() => FileMakerReference.InUse" class="text-danger" />
+            </div>
+            <button type="submit" class="btn btn-primary">Create</button>
+        </EditForm>
+    </div>
+</div>
+
+<div>
+    <a href="/filemakerreferences">Back to List</a>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private FileMakerReference FileMakerReference { get; set; } = new();
+
+    // To protect from overposting attacks, see https://learn.microsoft.com/aspnet/core/blazor/forms/#mitigate-overposting-attacks.
+    private async Task AddFileMakerReference()
+    {
+        using var context = DbFactory.CreateDbContext();
+        context.FileMakerReference.Add(FileMakerReference);
+        await context.SaveChangesAsync();
+        NavigationManager.NavigateTo("/filemakerreferences");
+    }
+}

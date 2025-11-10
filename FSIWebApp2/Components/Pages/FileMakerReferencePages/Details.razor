@@ -1,0 +1,62 @@
+﻿@page "/filemakerreferences/details"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using FSIWebApp2.Data.Models
+@inject IDbContextFactory<FSIWebApp2.Data.ApplicationDbContext> DbFactory
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin")]
+
+<PageTitle>Details</PageTitle>
+
+<h1>Details</h1>
+
+<div>
+    <h2>FileMakerReference</h2>
+    <hr />
+    @if (filemakerreference is null)
+    {
+        <p><em>Loading...</em></p>
+    }
+    else
+    {
+        <dl class="row">
+            <dt class="col-sm-2">FileMakerName</dt>
+            <dd class="col-sm-10">@filemakerreference.FileMakerName</dd>
+            <dt class="col-sm-2">NewFsiName</dt>
+            <dd class="col-sm-10">@filemakerreference.NewFsiName</dd>
+            <dt class="col-sm-2">SQLDataType</dt>
+            <dd class="col-sm-10">@filemakerreference.SQLDataType</dd>
+            <dt class="col-sm-2">GenericDataType</dt>
+            <dd class="col-sm-10">@filemakerreference.GenericDataType</dd>
+            <dt class="col-sm-2">Key</dt>
+            <dd class="col-sm-10">@filemakerreference.Key</dd>
+            <dt class="col-sm-2">Nullable</dt>
+            <dd class="col-sm-10">@filemakerreference.Nullable</dd>
+            <dt class="col-sm-2">InUse</dt>
+            <dd class="col-sm-10">@filemakerreference.InUse</dd>
+        </dl>
+        <div>
+            <a href="@($"/filemakerreferences/edit?id={filemakerreference.Id}")">Edit</a> |
+            <a href="@($"/filemakerreferences")">Back to List</a>
+        </div>
+    }
+</div>
+
+@code {
+    private FileMakerReference? filemakerreference;
+
+    [SupplyParameterFromQuery]
+    private int Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var context = DbFactory.CreateDbContext();
+        filemakerreference = await context.FileMakerReference.FirstOrDefaultAsync(m => m.Id == Id);
+
+        if (filemakerreference is null)
+        {
+            NavigationManager.NavigateTo("notfound");
+        }
+    }
+}
