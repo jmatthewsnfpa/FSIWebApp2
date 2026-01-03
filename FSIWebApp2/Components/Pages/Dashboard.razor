@@ -4,8 +4,14 @@
 @using FSIWebApp2.Data.Helpers
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.DependencyInjection
 @using Microsoft.JSInterop
 @using FSIWebApp2.Data.Models
+@using System.IO
+@using CsvHelper
+@using CsvHelper.Configuration
+@using Microsoft.AspNetCore.ResponseCompression
+@using System.Globalization
 @inject IDbContextFactory<FSIWebApp2.Data.ApplicationDbContext> DbFactory
 @inject IJSRuntime JSRuntime
 @inject NavigationManager NavigationManager
@@ -208,8 +214,8 @@
             mostRecordsState = recordsByState.OrderByDescending(r => r.Count).FirstOrDefault();
             leastRecordsState = recordsByState.OrderBy(r => r.Count).FirstOrDefault();
 
-            fsis = await context.FSI.ToListAsync();
-            protectedtowns = await context.ProtectedTowns.ToListAsync();
+            // fsis = await context.FSI.ToListAsync();
+            // protectedtowns = await context.ProtectedTowns.ToListAsync();
         }
         catch (Exception ex)
         {
@@ -231,18 +237,19 @@
         try
         {
             await using var context = await DbFactory.CreateDbContextAsync();
-            string csvContent = string.Empty;
+            // string csvContent = string.Empty;
             string filename = string.Empty;
+            Stream? stream = null;
 
             // Added the option to select which table to download
             switch (SelectedTable)
             {
                 case "FSI":
-                    csvContent = await GenerateFsiCsvAsync(context);
+                    stream = await GenerateFsiCsvStreamAsync(context);
                     filename = "FSI_Data.csv";
                     break;
                 case "ProtectedTowns":
-                    csvContent = await GenerateProtectedTownsCsvAsync(context);
+                    stream /* csvContent */ = await GenerateProtectedTownsCsvStreamAsync(context);
                     filename = "ProtectedTowns_Data.csv";
                     break;
                 default:
@@ -251,14 +258,19 @@
                     return;
             }
 
-            if (string.IsNullOrEmpty(csvContent))
+            // if (string.IsNullOrEmpty(csvContent))
+            if (stream == null || stream.Length == 0)
             {
                 IsLoading = false;
                 return;
             }
 
-            // Call the BlazorHelper.js 
-            await JSRuntime.InvokeVoidAsync("BlazorDownloadFile", filename, csvContent);
+            using var streamRef = new DotNetStreamReference(stream);
+
+            await JSRuntime.InvokeVoidAsync("downloadFileFromStream", filename, streamRef);
+
+            // Call download.js, previously BlazorHelper.js
+            
         }
         catch (Exception ex)
         {
@@ -271,44 +283,327 @@
         }
     }
 
-    private async Task<string> GenerateFsiCsvAsync(ApplicationDbContext context)
+    private async Task<Stream?> GenerateFsiCsvStreamAsync(ApplicationDbContext context)
     {
-        var fsisToDownload = await context.FSI.AsNoTracking().ToListAsync();
-        if (!fsisToDownload.Any())
+        // Fetch records and stream them directly
+        var fsisToDownload = context.FSI.AsNoTracking().AsAsyncEnumerable();
+
+        var memoryStream = new MemoryStream();
+        await using var writer = new StreamWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
+
+        // Write UTF-8 BOM to help Excel recognize encoding
+        await writer.WriteAsync('\ufeff');
+
+        var hasAny = false;
+        var headersWritten = false;
+
+        await foreach (var fsi in fsisToDownload)
+        {
+            if (!headersWritten)
+            {
+                // Write Headers with proper escaping
+                var headers = new List<string>
+                {
+                    "NfpaFdid", "NfirsId", "FdName", "CreatedDt", "UpdatedDt", "Street", "Street2", "City",
+                    "CountyNo", "State", "StateId", "StateGroup", "StateGroupOverride", "Zipcode", "Zipcode2",
+                    "Region", "Country", "AddressDt", "Phone", "PhoneDt", "Email", "EmailDt", "Fax", "FaxDt",
+                    "ContactName", "ContactRank", "ContactRankId", "ContactDt", "RecordType", "RecordTypeId",
+                    "RecordStatus", "CrossRefId", "SmSa", "DataSource", "SquareMiles", "Community", "CommunityId",
+                    "Population", "PopInterval", "PopIntervalId", "TypeEmps", "TypeEmpsId", "PaidEmps",
+                    "PaidEmpsWomen", "WorkWeek", "EmpsPerShift", "VolsComp", "Vols", "VolsWomen", "Pumpers",
+                    "Ladders", "Combo", "MarineVessels", "OtherSupport", "OtherVehicles", "ThermalEquipment",
+                    "Stations", "Ems", "EmsId", "Ambulance", "Dispatch", "DispatchId", "Training", "TrainingId",
+                    "CodeEnforcement", "CodeEnforcementId", "LastReturned", "LastSent", "Notes", "FdSurveyStatus1",
+                    "FdSurveyStatus2", "FdSurveyStatus3", "FdSurveyStatus4", "FdSurveyStatus5", "FdSurveyStatus6",
+                    "FdSurveyStatus7", "FdSurveyYears1", "FdSurveyYears2", "FdSurveyYears3", "FdSurveyYears4",
+                    "FdSurveyYears5", "FdSurveyYears6", "FdSurveyYears7"
+                };
+
+                await writer.WriteLineAsync(string.Join(",", headers));
+                headersWritten = true;
+            }
+
+            // Write Data Row with proper CSV escaping
+            var rowValues = new List<string>
+            {
+                EscapeCsvValue(fsi.NfpaFdid.ToString()),
+                EscapeCsvValue(fsi.NfirsId!),
+                EscapeCsvValue(fsi.FdName),
+                EscapeCsvValue(fsi.CreatedDt.ToString("yyyy-MM-dd HH:mm:ss")),
+                EscapeCsvValue(fsi.UpdatedDt.ToString("yyyy-MM-dd HH:mm:ss")),
+                EscapeCsvValue(fsi.Street!),
+                EscapeCsvValue(fsi.Street2!),
+                EscapeCsvValue(fsi.City!),
+                EscapeCsvValue(fsi.CountyNo.ToString()!),
+                EscapeCsvValue(fsi.State.ToString()),
+                EscapeCsvValue(fsi.StateId.ToString()!),
+                EscapeCsvValue(fsi.StateGroup.ToString()!),
+                EscapeCsvValue(fsi.StateGroupOverride.ToString()!),
+                EscapeCsvValue(fsi.Zipcode!),
+                EscapeCsvValue(fsi.Zipcode2!),
+                EscapeCsvValue(fsi.Region.ToString()),
+                EscapeCsvValue(fsi.Country.ToString()),
+                EscapeCsvValue(fsi.AddressDt.ToString("yyyy-MM-dd")),
+                EscapeCsvValue(fsi.Phone!),
+                EscapeCsvValue(fsi.PhoneDt.ToString("yyyy-MM-dd")),
+                EscapeCsvValue(fsi.Email!),
+                EscapeCsvValue(fsi.EmailDt.ToString("yyyy-MM-dd")),
+                EscapeCsvValue(fsi.Fax!),
+                EscapeCsvValue(fsi.FaxDt.ToString("yyyy-MM-dd")),
+                EscapeCsvValue(fsi.ContactName!),
+                EscapeCsvValue(fsi.ContactRank.ToString()),
+                EscapeCsvValue(fsi.ContactRankId.ToString()!),
+                EscapeCsvValue(fsi.ContactDt.ToString("yyyy-MM-dd")),
+                EscapeCsvValue(fsi.RecordType),
+                EscapeCsvValue(fsi.RecordTypeId.ToString()!),
+                EscapeCsvValue(fsi.RecordStatus.ToString()),
+                EscapeCsvValue(fsi.CrossRefId.ToString()!),
+                EscapeCsvValue(fsi.SmSa.ToString()!),
+                EscapeCsvValue(fsi.DataSource!),
+                EscapeCsvValue(fsi.SquareMiles.ToString()!),
+                EscapeCsvValue(fsi.Community.ToString()!),
+                EscapeCsvValue(fsi.CommunityId.ToString()!),
+                EscapeCsvValue(fsi.Population.ToString()!),
+                EscapeCsvValue(fsi.PopInterval.ToString()!),
+                EscapeCsvValue(fsi.PopIntervalId.ToString()!),
+                EscapeCsvValue(fsi.TypeEmps.ToString()!),
+                EscapeCsvValue(fsi.TypeEmpsId.ToString()!),
+                EscapeCsvValue(fsi.PaidEmps.ToString()!),
+                EscapeCsvValue(fsi.PaidEmpsWomen.ToString()!),
+                EscapeCsvValue(fsi.WorkWeek.ToString()!),
+                EscapeCsvValue(fsi.EmpsPerShift.ToString()!),
+                EscapeCsvValue(fsi.VolsComp.ToString()!),
+                EscapeCsvValue(fsi.Vols.ToString()!),
+                EscapeCsvValue(fsi.VolsWomen.ToString()!),
+                EscapeCsvValue(fsi.Pumpers.ToString()!),
+                EscapeCsvValue(fsi.Ladders.ToString()!),
+                EscapeCsvValue(fsi.Combo.ToString()!),
+                EscapeCsvValue(fsi.MarineVessels.ToString()!),
+                EscapeCsvValue(fsi.OtherSupport.ToString()!),
+                EscapeCsvValue(fsi.OtherVehicles.ToString()!),
+                EscapeCsvValue(fsi.ThermalEquipment.ToString()!),
+                EscapeCsvValue(fsi.Stations.ToString()!),
+                EscapeCsvValue(fsi.Ems.ToString()!),
+                EscapeCsvValue(fsi.EmsId.ToString()!),
+                EscapeCsvValue(fsi.Ambulance.ToString()!),
+                EscapeCsvValue(fsi.Dispatch.ToString()!),
+                EscapeCsvValue(fsi.DispatchId.ToString()!),
+                EscapeCsvValue(fsi.Training.ToString()!),
+                EscapeCsvValue(fsi.TrainingId.ToString()!),
+                EscapeCsvValue(fsi.CodeEnforcement.ToString()!),
+                EscapeCsvValue(fsi.CodeEnforcementId.ToString()!),
+                EscapeCsvValue(fsi.LastReturned.HasValue ? fsi.LastReturned.Value.ToString("yyyy-MM-dd") : string.Empty),
+                EscapeCsvValue(fsi.LastSent.HasValue ? fsi.LastSent.Value.ToString("yyyy-MM-dd") : string.Empty),
+                EscapeCsvValue(fsi.Notes!),
+                EscapeCsvValue(fsi.FdSurveyStatus1.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyStatus2.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyStatus3.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyStatus4.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyStatus5.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyStatus6.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyStatus7.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears1.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears2.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears3.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears4.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears5.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears6.ToString()!),
+                EscapeCsvValue(fsi.FdSurveyYears7.ToString()!)
+            };
+
+            await writer.WriteLineAsync(string.Join(",", rowValues));
+            hasAny = true;
+
+            // Flush periodically to manage memory
+            if (memoryStream.Length > 1024 * 1024 * 10) // 10MB chunks
+            {
+                await writer.FlushAsync();
+            }
+        }
+
+        if (!hasAny)
         {
             Message = "No FSI records found to download.";
-            return string.Empty;
+            memoryStream.Dispose();
+            return Stream.Null;
         }
 
-        // Customize Download ***************** Consider custom options for user *******************
-        var sb = new StringBuilder();
-        sb.AppendLine("NfpaFdid,NfirsId,FdName,CreatedDt,UpdatedDt,Street,Street2,City,CountyNo,State,StateId,StateGroup,StateGroupOverride,Zipcode,Zipcode2,Region,Country,AddressDt,Phone,PhoneDt,Email,EmailDt,Fax,FaxDt,ContactName,ContactRank,ContactRankId,ContactDt,RecordType,RecordTypeId,RecordStatus,CrossRefId,SmSa,DataSource,SquareMiles,Community,CommunityId,Population,PopInterval,PopIntervalId,TypeEmps,TypeEmpsId,PaidEmps,PaidEmpsWomen,WorkWeek,EmpsPerShift,VolsComp,Vols,VolsWomen,Pumpers,Ladders,Combo,MarineVessels,OtherSupport,OtherVehicles,ThermalEquipment,Stations,Ems,EmsId,Ambulance,Dispatch,DispatchId,Training,TrainingId,CodeEnforcement,CodeEnforcementId,LastReturned,LastSent,Notes,FdSurveyStatus1,FdSurveyStatus2,FdSurveyStatus3,FdSurveyStatus4,FdSurveyStatus5,FdSurveyStatus6,FdSurveyStatus7,FdSurveyYears1,FdSurveyYears2,FdSurveyYears3,FdSurveyYears4,FdSurveyYears5,FdSurveyYears6,FdSurveyYears7"); /* LastReturned,LastSent, */
-        foreach (var fsi in fsisToDownload)
-        {
-            sb.AppendLine($"{fsi.NfpaFdid},{fsi.NfirsId},{fsi.FdName},{fsi.CreatedDt},{fsi.UpdatedDt},{fsi.Street},{fsi.Street2},{fsi.City},{fsi.CountyNo},{fsi.State},{fsi.StateId},{fsi.StateGroup},{fsi.StateGroupOverride},{fsi.Zipcode},{fsi.Zipcode2},{fsi.Region},{fsi.Country},{fsi.AddressDt},{fsi.Phone},{fsi.PhoneDt},{fsi.Email},{fsi.EmailDt},{fsi.Fax},{fsi.FaxDt},{fsi.ContactName},{fsi.ContactRank},{fsi.ContactRankId},{fsi.ContactDt},{fsi.RecordType},{fsi.RecordTypeId},{fsi.RecordStatus},{fsi.CrossRefId},{fsi.SmSa},{fsi.DataSource},{fsi.SquareMiles},{fsi.Community},{fsi.CommunityId},{fsi.Population},{fsi.PopInterval},{fsi.PopIntervalId},{fsi.TypeEmps},{fsi.TypeEmpsId},{fsi.PaidEmps},{fsi.PaidEmpsWomen},{fsi.WorkWeek},{fsi.EmpsPerShift},{fsi.VolsComp},{fsi.Vols},{fsi.VolsWomen},{fsi.Pumpers},{fsi.Ladders},{fsi.Combo},{fsi.MarineVessels},{fsi.OtherSupport},{fsi.OtherVehicles},{fsi.ThermalEquipment},{fsi.Stations},{fsi.Ems},{fsi.EmsId},{fsi.Ambulance},{fsi.Dispatch},{fsi.DispatchId},{fsi.Training},{fsi.TrainingId},{fsi.CodeEnforcement},{fsi.CodeEnforcementId},{fsi.LastReturned},{fsi.LastSent},{fsi.Notes},{fsi.FdSurveyStatus1},{fsi.FdSurveyStatus2},{fsi.FdSurveyStatus3},{fsi.FdSurveyStatus4},{fsi.FdSurveyStatus5},{fsi.FdSurveyStatus6},{fsi.FdSurveyStatus7},{fsi.FdSurveyYears1},{fsi.FdSurveyYears2},{fsi.FdSurveyYears3},{fsi.FdSurveyYears4},{fsi.FdSurveyYears5},{fsi.FdSurveyYears6},{fsi.FdSurveyYears7}");
-        }
-        return sb.ToString();
+        await writer.FlushAsync();
+        memoryStream.Position = 0;
+        return memoryStream;
     }
 
-    private async Task<string> GenerateProtectedTownsCsvAsync(ApplicationDbContext context)
+    private string EscapeCsvValue(object value)
     {
-        var protectedTowns = await context.ProtectedTowns.AsNoTracking().ToListAsync();
-        if (!protectedTowns.Any())
+        if (value == null)
+            return string.Empty;
+
+        var stringValue = value.ToString();
+
+        if (string.IsNullOrEmpty(stringValue))
+            return string.Empty;
+
+        // Prefix fields that start with formula characters to prevent Excel from treating them as formulas
+        if (stringValue.StartsWith("=") || stringValue.StartsWith("+") ||
+            stringValue.StartsWith("-") || stringValue.StartsWith("@"))
+        {
+            stringValue = "'" + stringValue;
+        }
+
+        // Check if we need to quote the field
+        bool needsQuotes = stringValue.Contains(",") ||
+                          stringValue.Contains("\"") ||
+                          stringValue.Contains("\n") ||
+                          stringValue.Contains("\r") ||
+                          stringValue.Contains("\t");
+
+        if (needsQuotes)
+        {
+            // Escape any existing quotes
+            stringValue = stringValue.Replace("\"", "\"\"");
+            return $"\"{stringValue}\"";
+        }
+
+        return stringValue;
+    }
+
+    private async Task<Stream?> GenerateProtectedTownsCsvStreamAsync(ApplicationDbContext context)
+    {
+        var protectedTowns = context.ProtectedTowns.AsNoTracking().AsAsyncEnumerable();
+
+        var memoryStream = new MemoryStream();
+        await using var writer = new StreamWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
+
+        // Write UTF-8 BOM
+        await writer.WriteAsync('\ufeff');
+
+        bool hasAny = false;
+        await foreach (var town in protectedTowns)
+        {
+            if (!hasAny)
+            {
+                // Write Headers
+                await writer.WriteLineAsync(string.Join(",", new[]
+                {
+                    "TownProtectedId", "TownProtectedName", "NfpaFdid", "FdName", "City", "State",
+                    "StateId", "StateGroup", "StateGroupOverride", "CreatedDt", "UpdatedDt"
+                }));
+                hasAny = true;
+            }
+
+            // Write Data Rows with proper escaping
+            var rowValues = new List<string>
+            {
+                EscapeCsvValue(town.TownProtectedId.ToString()),
+                EscapeCsvValue(town.TownProtectedName),
+                EscapeCsvValue(town.NfpaFdid.ToString()),
+                EscapeCsvValue(town.FdName),
+                EscapeCsvValue(town.City!),
+                EscapeCsvValue(town.State.ToString()),
+                EscapeCsvValue(town.StateId.ToString()),
+                EscapeCsvValue(town.StateGroup.ToString()),
+                EscapeCsvValue(town.StateGroupOverride.ToString()!),
+                EscapeCsvValue(town.CreatedDt.ToString("yyyy-MM-dd HH:mm:ss")),
+                EscapeCsvValue(town.UpdatedDt.ToString("yyyy-MM-dd HH:mm:ss"))
+            };
+
+            await writer.WriteLineAsync(string.Join(",", rowValues));
+
+            // Flush periodically
+            if (memoryStream.Length > 1024 * 1024 * 10) // 10MB chunks
+            {
+                await writer.FlushAsync();
+            }
+        }
+
+        if (!hasAny)
         {
             Message = "No Protected Towns records found to download.";
-            return string.Empty;
+            memoryStream.Dispose();
+            return Stream.Null;
         }
 
-        // Customize Download
-        var sb = new StringBuilder();
-        sb.AppendLine("TownProtectedId,TownProtectedName,NfpaFdid,FdName,City,State,StateId,StateGroup,StateGroupOverride,CreatedDt,UpdatedDt");
-        foreach (var town in protectedTowns)
-        {
-            sb.AppendLine($"{town.TownProtectedId},{town.TownProtectedName},{town.NfpaFdid},{town.FdName},{town.City},{town.State},{town.StateId},{town.StateGroup},{town.StateGroupOverride},{town.CreatedDt},{town.UpdatedDt}");
-        }
-        return sb.ToString();
+        await writer.FlushAsync();
+        memoryStream.Position = 0;
+        return memoryStream;
     }
 }
+}
+
+
+
+
+
+
+    @* private async Task<Stream?> GenerateFsiCsvStreamAsync(ApplicationDbContext context)
+    {
+        // Fetch records but stream them directly from the database without loading all at once
+        var fsisToDownload = context.FSI.AsNoTracking().AsAsyncEnumerable();
+
+        var memoryStream = new MemoryStream();
+        await using var writer = new StreamWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
+
+        // Fix: Replace 'await fsisToDownload.AnyAsync()' with a manual check for at least one record
+        var hasAny = false;
+        await foreach (var fsi in fsisToDownload)
+        {
+            if (!hasAny)
+            {
+                // Write Headers
+                await writer.WriteLineAsync("NfpaFdid,NfirsId,FdName,CreatedDt,UpdatedDt,Street,Street2,City,CountyNo,State,StateId,StateGroup,StateGroupOverride,Zipcode,Zipcode2,Region,Country,AddressDt,Phone,PhoneDt,Email,EmailDt,Fax,FaxDt,ContactName,ContactRank,ContactRankId,ContactDt,RecordType,RecordTypeId,RecordStatus,CrossRefId,SmSa,DataSource,SquareMiles,Community,CommunityId,Population,PopInterval,PopIntervalId,TypeEmps,TypeEmpsId,PaidEmps,PaidEmpsWomen,WorkWeek,EmpsPerShift,VolsComp,Vols,VolsWomen,Pumpers,Ladders,Combo,MarineVessels,OtherSupport,OtherVehicles,ThermalEquipment,Stations,Ems,EmsId,Ambulance,Dispatch,DispatchId,Training,TrainingId,CodeEnforcement,CodeEnforcementId,LastReturned,LastSent,Notes,FdSurveyStatus1,FdSurveyStatus2,FdSurveyStatus3,FdSurveyStatus4,FdSurveyStatus5,FdSurveyStatus6,FdSurveyStatus7,FdSurveyYears1,FdSurveyYears2,FdSurveyYears3,FdSurveyYears4,FdSurveyYears5,FdSurveyYears6,FdSurveyYears7");
+                hasAny = true;
+            }
+            // Write Data Rows
+            await writer.WriteLineAsync($"{fsi.NfpaFdid},{fsi.NfirsId},{fsi.FdName},{fsi.CreatedDt},{fsi.UpdatedDt},{fsi.Street},{fsi.Street2},{fsi.City},{fsi.CountyNo},{fsi.State},{fsi.StateId},{fsi.StateGroup},{fsi.StateGroupOverride},{fsi.Zipcode},{fsi.Zipcode2},{fsi.Region},{fsi.Country},{fsi.AddressDt},{fsi.Phone},{fsi.PhoneDt},{fsi.Email},{fsi.EmailDt},{fsi.Fax},{fsi.FaxDt},{fsi.ContactName},{fsi.ContactRank},{fsi.ContactRankId},{fsi.ContactDt},{fsi.RecordType},{fsi.RecordTypeId},{fsi.RecordStatus},{fsi.CrossRefId},{fsi.SmSa},{fsi.DataSource},{fsi.SquareMiles},{fsi.Community},{fsi.CommunityId},{fsi.Population},{fsi.PopInterval},{fsi.PopIntervalId},{fsi.TypeEmps},{fsi.TypeEmpsId},{fsi.PaidEmps},{fsi.PaidEmpsWomen},{fsi.WorkWeek},{fsi.EmpsPerShift},{fsi.VolsComp},{fsi.Vols},{fsi.VolsWomen},{fsi.Pumpers},{fsi.Ladders},{fsi.Combo},{fsi.MarineVessels},{fsi.OtherSupport},{fsi.OtherVehicles},{fsi.ThermalEquipment},{fsi.Stations},{fsi.Ems},{fsi.EmsId},{fsi.Ambulance},{fsi.Dispatch},{fsi.DispatchId},{fsi.Training},{fsi.TrainingId},{fsi.CodeEnforcement},{fsi.CodeEnforcementId},{fsi.LastReturned},{fsi.LastSent},{fsi.Notes},{fsi.FdSurveyStatus1},{fsi.FdSurveyStatus2},{fsi.FdSurveyStatus3},{fsi.FdSurveyStatus4},{fsi.FdSurveyStatus5},{fsi.FdSurveyStatus6},{fsi.FdSurveyStatus7},{fsi.FdSurveyYears1},{fsi.FdSurveyYears2},{fsi.FdSurveyYears3},{fsi.FdSurveyYears4},{fsi.FdSurveyYears5},{fsi.FdSurveyYears6},{fsi.FdSurveyYears7}");
+        }
+
+        if (!hasAny)
+        {
+            Message = "No FSI records found to download.";
+            memoryStream.Dispose();
+            return Stream.Null;
+        }
+
+        // Must flush the writer and reset the stream position to the beginning
+        await writer.FlushAsync();
+        memoryStream.Position = 0;
+        return memoryStream;
+    }
+
+    
+    private async Task<Stream?> GenerateProtectedTownsCsvStreamAsync(ApplicationDbContext context)
+{
+    var protectedTowns = context.ProtectedTowns.AsNoTracking().AsAsyncEnumerable();
+
+    var memoryStream = new MemoryStream();
+    await using var writer = new StreamWriter(memoryStream, Encoding.UTF8, leaveOpen: true);
+
+    bool hasAny = false;
+    await foreach (var town in protectedTowns)
+    {
+        if (!hasAny)
+        {
+            // Write Headers
+            await writer.WriteLineAsync("TownProtectedId,TownProtectedName,NfpaFdid,FdName,City,State,StateId,StateGroup,StateGroupOverride,CreatedDt,UpdatedDt");
+            hasAny = true;
+        }
+        // Write Data Rows
+        await writer.WriteLineAsync($"{town.TownProtectedId},{town.TownProtectedName},{town.NfpaFdid},{town.FdName},{town.City},{town.State},{town.StateId},{town.StateGroup},{town.StateGroupOverride},{town.CreatedDt},{town.UpdatedDt}");
+    }
+
+    if (!hasAny)
+    {
+        Message = "No Protected Towns records found to download.";
+        memoryStream.Dispose();
+        return Stream.Null;
+    }
+
+    await writer.FlushAsync();
+    memoryStream.Position = 0;
+    return memoryStream;
+
+}
+} *@
 
 @* ********** ONLY FSI DOWNLOAD **********
 
