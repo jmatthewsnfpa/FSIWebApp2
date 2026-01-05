@@ -1,6 +1,7 @@
 ﻿using FSIWebApp2.Components;
 using FSIWebApp2.Components.Account;
 using FSIWebApp2.Data;
+using FSIWebApp2.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +39,8 @@ builder.Services.AddIdentityCore<ApplicationUser>(options => options.SignIn.Requ
 
 builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
 builder.Services.AddMemoryCache();
+
+builder.Services.AddScoped<IQueryBuilderService, QueryBuilderService>();
 
 var app = builder.Build();
 
